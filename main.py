@@ -30,6 +30,7 @@ KV = '''
 
     MDTextField:
         hint_text: "Ваш логин"
+        
 Screen: 
     MDToolbar:
         id: toolbar
@@ -52,7 +53,7 @@ Screen:
         cols: 1
 
     ScrollView:
-        size_hint: 0.74, 0.8
+        size_hint: 0.74, 0.79
         # setting the width of the scrollbar to 50pixels
         bar_width: 10
         # setting the color of the active bar using rgba
@@ -76,6 +77,7 @@ Screen:
         on_release: app.set_message()
     MDTextField:
         id: message
+        hint_text: "Сообщение"
         md_bg_color: app.theme_cls.accent_color
         pos_hint: {"top": 0.1, "right":0.95}
         size_hint_x: 0.7
@@ -104,10 +106,12 @@ class Chat(MDApp):
            'getAuthors': "SELECT author FROM message"}
     dialog_1 = None
     dialog_2 = None
+    chats = {}
     nickname = ''
     press = 0
     count_dialogs = 0
     count_messages = 0
+    active_dialog = ''
     chat_id = 1
 
     def build(self):
@@ -116,12 +120,14 @@ class Chat(MDApp):
         return self.screen
 
     def on_start(self):
-        self.get_message(self.chat_id, "start")
-        self.get_chats()
+        self.dialog_nickname()
 
-    def get_message(self, i, visit):
-        print(i)
-        self.chat_id = i
+    def check_and_start(self):
+        if self.nickname != '':
+            self.get_chats()
+
+    def get_message(self, chat_name, visit):
+        self.chat_id = self.chats.get(chat_name)
         if visit == "get_chats":
             self.root.ids.coc.clear_widgets()
             self.count_messages = 0
@@ -138,22 +144,23 @@ class Chat(MDApp):
         self.count_messages = len(text_message)
 
     def get_chats(self):
-        global chats
         self.cursor.execute(self.sql['getChat_name'])
         chat_name = self.cursor.fetchall()
         if self.count_dialogs != len(chat_name):
             for i in range(0, len(chat_name)):
-                chats = {i: str(*chat_name[i])}
+                self.chats[str(*chat_name[i])] = i + 1
                 self.root.ids.box.add_widget(
                     MDRectangleFlatButton(
                         text=str(*chat_name[i]),
                         size_hint=(.1, None),
-                        on_press=lambda x: self.get_message(i + 1, "get_chats")
+                        on_press=self.pressed_btn,
                     )
                 )
-        for l in range(0, len(chats)):
-            print(chats)
         self.count_dialogs = len(chat_name)
+
+    def pressed_btn(self, instance_toggle_button):
+        self.active_dialog = instance_toggle_button.text
+        self.get_message(self.active_dialog, "get_chats")
 
     def set_message(self):
         text_message = self.root.ids.message.text
@@ -163,7 +170,7 @@ class Chat(MDApp):
                 "INSERT INTO message (text_message, time, chat_id, author) VALUES ('" + text_message + "', '" + today.strftime(
                     "%Y-%m-%d-%H.%M.%S") + "', '" + str(self.chat_id) + "', '" + self.nickname + "');");
             self.conn.commit()
-            self.get_message(self.chat_id, "set_message")
+            self.get_message(self.active_dialog, "set_message")
             self.get_chats()
             self.root.ids.message.text = ""
 
@@ -210,11 +217,12 @@ class Chat(MDApp):
             if isinstance(obj, MDTextField):
                 if obj.text != '':
                     self.nickname = obj.text
-                    print(self.nickname)
+        self.check_and_start()
 
     def closeDialog(self, inst):
         if self.dialog_2:
             self.dialog_2.dismiss()
+            self.check_and_start()
         if self.dialog_1:
             self.dialog_1.dismiss()
 
