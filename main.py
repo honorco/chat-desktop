@@ -121,6 +121,7 @@ class Chat(MDApp):
 
     def on_start(self):
         self.dialog_nickname()
+        self.get_chats()
 
     def check_and_start(self):
         if self.nickname != '':
@@ -143,7 +144,7 @@ class Chat(MDApp):
                 )
         self.count_messages = len(text_message)
 
-    def get_chats(self):
+    def get_chats(self):    # update_chats
         self.cursor.execute(self.sql['getChat_name'])
         chat_name = self.cursor.fetchall()
         if self.count_dialogs != len(chat_name):
