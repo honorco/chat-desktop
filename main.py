@@ -12,6 +12,12 @@ from kivymd.uix.label import MDLabel
 from kivymd.uix.menu import MDDropdownMenu
 from kivymd.uix.textfield import MDTextField, MDTextFieldRect, MDTextFieldRound
 
+
+import _thread
+import asyncio
+import json
+from connector import ClientConnector
+
 KV = '''
 <Content>
     orientation: "vertical"
@@ -97,10 +103,10 @@ class Dialog(BoxLayout):
 # sm.add_widget(MenuScreen(name='menu'))
 # sm.add_widget(SpinnerScreen(name='spinner'))
 
+conn = sqlite3.connect('test.db3', check_same_thread=False)
+
 
 class Chat(MDApp):
-    conn = sqlite3.connect('test.db3')
-    cursor = conn.cursor()
     sql = {'getChat_name': "SELECT chat_name FROM chat",
            'getMessage_text_message': "SELECT text_message FROM message where chat_id =",
            'getAuthors': "SELECT author FROM message"}
@@ -114,39 +120,25 @@ class Chat(MDApp):
     active_dialog = ''
     chat_id = 1
 
+    def __init__(self, dataProvider, **kwargs):  # создание меню
+        super().__init__(**kwargs)
+        self.dataProvider = dataProvider
+        self.screen = Builder.load_string(KV)
+
     def build(self):
         self.theme_cls.accent_palette = "Lime"
         self.theme_cls.primary_palette = "LightBlue"
         return self.screen
 
     def on_start(self):
-        self.dialog_nickname()
-        self.get_chats()
+        #self.dialog_nickname()
+        self.reload_chats()
 
-    def check_and_start(self):
-        if self.nickname != '':
-            self.get_chats()
-
-    def get_message(self, chat_name, visit):
-        self.chat_id = self.chats.get(chat_name)
-        if visit == "get_chats":
-            self.root.ids.coc.clear_widgets()
-            self.count_messages = 0
-        self.cursor.execute(self.sql['getMessage_text_message'] + str(self.chat_id))
-        text_message = self.cursor.fetchall()
-        if self.count_messages != len(text_message):
-            for k in range(self.count_messages, len(text_message)):
-                self.root.ids.coc.add_widget(
-                    MDLabel(
-                        text=str(*text_message[k]),
-                        size_hint=(.1, None),
-                    )
-                )
-        self.count_messages = len(text_message)
-
-    def get_chats(self):    # update_chats
-        self.cursor.execute(self.sql['getChat_name'])
-        chat_name = self.cursor.fetchall()
+    def reload_chats(self):
+        cursor = conn.cursor()
+        cursor.execute(self.sql['getChat_name'])
+        chat_name = cursor.fetchall()
+        self.root.ids.box.clear_widgets()
         if self.count_dialogs != len(chat_name):
             for i in range(0, len(chat_name)):
                 self.chats[str(*chat_name[i])] = i + 1
@@ -154,81 +146,143 @@ class Chat(MDApp):
                     MDRectangleFlatButton(
                         text=str(*chat_name[i]),
                         size_hint=(.1, None),
-                        on_press=self.pressed_btn,
+                       # on_press=self.pressed_btn,
                     )
                 )
         self.count_dialogs = len(chat_name)
+        cursor.close()
+    # def check_and_start(self):
+    #     if self.nickname != '':
+    #         self.get_chats()
 
-    def pressed_btn(self, instance_toggle_button):
-        self.active_dialog = instance_toggle_button.text
-        self.get_message(self.active_dialog, "get_chats")
+    # def get_message(self, chat_name, visit):
+    #     self.chat_id = self.chats.get(chat_name)
+    #     if visit == "get_chats":
+    #         self.root.ids.coc.clear_widgets()
+    #         self.count_messages = 0
+    #     self.cursor.execute(self.sql['getMessage_text_message'] + str(self.chat_id))
+    #     text_message = self.cursor.fetchall()
+    #     if self.count_messages != len(text_message):
+    #         for k in range(self.count_messages, len(text_message)):
+    #             self.root.ids.coc.add_widget(
+    #                 MDLabel(
+    #                     text=str(*text_message[k]),
+    #                     size_hint=(.1, None),
+    #                 )
+    #             )
+    #     self.count_messages = len(text_message)
 
-    def set_message(self):
-        text_message = self.root.ids.message.text
-        if text_message != '':
-            today = datetime.today()
-            self.cursor.execute(
-                "INSERT INTO message (text_message, time, chat_id, author) VALUES ('" + text_message + "', '" + today.strftime(
-                    "%Y-%m-%d-%H.%M.%S") + "', '" + str(self.chat_id) + "', '" + self.nickname + "');");
-            self.conn.commit()
-            self.get_message(self.active_dialog, "set_message")
-            self.get_chats()
-            self.root.ids.message.text = ""
+    # def get_chats(self):  # update_chats
+    #    pass
 
-    def __init__(self, **kwargs):  # создание меню
-        super().__init__(**kwargs)
-        self.screen = Builder.load_string(KV)
+    # def pressed_btn(self, instance_toggle_button):
+    #     self.active_dialog = instance_toggle_button.text
+    #     self.get_message(self.active_dialog, "get_chats")
+    #
+    # def set_message(self):
+    #     text_message = self.root.ids.message.text
+    #     if text_message != '':
+    #         today = datetime.today()
+    #         self.cursor.execute(
+    #             "INSERT INTO message (text_message, time, chat_id, author) VALUES ('" + text_message + "', '" + today.strftime(
+    #                 "%Y-%m-%d-%H.%M.%S") + "', '" + str(self.chat_id) + "', '" + self.nickname + "');");
+    #         self.conn.commit()
+    #         self.get_message(self.active_dialog, "set_message")
+    #         self.get_chats()
+    #         self.root.ids.message.text = ""
+    #
 
-    def dialog_nickname(self):
-        if not self.dialog_2:
-            self.dialog_2 = MDDialog(
-                title="Никнейм",
-                type="custom",
-                content_cls=Dialog(),
-                buttons=[
-                    MDFlatButton(
-                        text="Закрыть", text_color=self.theme_cls.primary_color, on_release=self.closeDialog
-                    ),
-                    MDFlatButton(
-                        text="Сохранить", text_color=self.theme_cls.primary_color, on_release=self.grabText
-                    ),
-                ],
-            )
-        self.dialog_2.open()
+    #
+    # def dialog_nickname(self):
+    #     if not self.dialog_2:
+    #         self.dialog_2 = MDDialog(
+    #             title="Никнейм",
+    #             type="custom",
+    #             content_cls=Dialog(),
+    #             buttons=[
+    #                 MDFlatButton(
+    #                     text="Закрыть", text_color=self.theme_cls.primary_color, on_release=self.closeDialog
+    #                 ),
+    #                 MDFlatButton(
+    #                     text="Сохранить", text_color=self.theme_cls.primary_color, on_release=self.grabText
+    #                 ),
+    #             ],
+    #         )
+    #     self.dialog_2.open()
+    #
+    # def new_chat_dialog(self):  # этот метод должен вызваться при нажатии кнопки
+    #     if not self.dialog_1:
+    #         self.dialog_1 = MDDialog(
+    #             title="Новый чат",
+    #             type="custom",
+    #             content_cls=Content(),
+    #             buttons=[
+    #                 MDFlatButton(
+    #                     text="Закрыть", text_color=self.theme_cls.primary_color, on_release=self.closeDialog
+    #                 ),
+    #                 MDFlatButton(
+    #                     text="Создать", text_color=self.theme_cls.primary_color
+    #                 ),
+    #             ],
+    #         )
+    #     self.dialog_1.open()
+    #
+    # def grabText(self, inst):
+    #     for obj in self.dialog_2.content_cls.children:
+    #         if isinstance(obj, MDTextField):
+    #             if obj.text != '':
+    #                 self.nickname = obj.text
+    #     self.check_and_start()
+    #
+    # def closeDialog(self, inst):
+    #     if self.dialog_2:
+    #         self.dialog_2.dismiss()
+    #         self.check_and_start()
+    #     if self.dialog_1:
+    #         self.dialog_1.dismiss()
+    #
+    # def on_stop(self):
+    #     self.conn.close()
 
-    def new_chat_dialog(self):  # этот метод должен вызваться при нажатии кнопки
-        if not self.dialog_1:
-            self.dialog_1 = MDDialog(
-                title="Новый чат",
-                type="custom",
-                content_cls=Content(),
-                buttons=[
-                    MDFlatButton(
-                        text="Закрыть", text_color=self.theme_cls.primary_color, on_release=self.closeDialog
-                    ),
-                    MDFlatButton(
-                        text="Создать", text_color=self.theme_cls.primary_color
-                    ),
-                ],
-            )
-        self.dialog_1.open()
 
-    def grabText(self, inst):
-        for obj in self.dialog_2.content_cls.children:
-            if isinstance(obj, MDTextField):
-                if obj.text != '':
-                    self.nickname = obj.text
-        self.check_and_start()
+class DataProvider:
+    def __init__(self):
+        self.loop = asyncio.get_event_loop()
 
-    def closeDialog(self, inst):
-        if self.dialog_2:
-            self.dialog_2.dismiss()
-            self.check_and_start()
-        if self.dialog_1:
-            self.dialog_1.dismiss()
+    def run(self, chat: Chat):
+        self.chat = chat
+        ClientConnector('localhost', 8765, {}, on_connected=self.on_connected)
+        _thread.start_new_thread(self.loop.run_forever, ())
 
-    def on_stop(self):
-        self.conn.close()
+    def on_connected(self, connection):
+        self.connector = connection
+        self.get_chats()
+
+    def get_chats(self):
+        self.loop.create_task(self._get_chats())
+
+    async def _get_chats(self):
+        cursor = conn.cursor()
+        cursor.execute('SELECT MAX(id) from chat')
+        last_id = cursor.fetchone()[0]
+
+        def get_chat_handler(_, data):
+            data = json.loads(data)
+            values = ''
+            for _chat in data:
+                values += f"({_chat[0]}, '{_chat[1]}'),"
+            if values:
+                values = values[:-1]
+                cursor.execute(f'INSERT INTO chat(id, chat_name) VALUES {values}')
+                conn.commit()
+            self.chat.reload_chats()
+        self.connector.send('/chats/get', json.dumps({'last_id': last_id}),
+                        callback=get_chat_handler)
 
 
-Chat().run()
+
+data_provider = DataProvider()
+
+chat = Chat(data_provider)
+data_provider.run(chat)
+chat.run()
