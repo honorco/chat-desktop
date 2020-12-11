@@ -138,8 +138,8 @@ class Chat(MDApp):
         cursor = conn.cursor()
         cursor.execute(self.sql['getChat_name'])
         chat_name = cursor.fetchall()
-        self.root.ids.box.clear_widgets()
         if self.count_dialogs != len(chat_name):
+            self.root.ids.box.clear_widgets()
             for i in range(0, len(chat_name)):
                 self.chats[str(*chat_name[i])] = i + 1
                 self.root.ids.box.add_widget(
@@ -251,7 +251,7 @@ class DataProvider:
 
     def run(self, chat: Chat):
         self.chat = chat
-        ClientConnector('localhost', 8765, {}, on_connected=self.on_connected)
+        ClientConnector('musaev.online', 8765, {}, on_connected=self.on_connected)
         _thread.start_new_thread(self.loop.run_forever, ())
 
     def on_connected(self, connection):
