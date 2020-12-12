@@ -6,7 +6,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivymd.app import MDApp
 from kivymd.theming import ThemeManager
-from kivymd.uix.button import MDRectangleFlatButton, MDTextButton, MDFlatButton, MDFloatingActionButton
+from kivymd.uix.button import MDRectangleFlatButton, MDTextButton, MDFlatButton, MDFloatingActionButton, MDRaisedButton
 from kivymd.uix.card import MDCard, MDSeparator
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.label import MDLabel
@@ -39,6 +39,7 @@ KV = '''
 
     MDTextField:
         hint_text: "Ваш логин"
+        text: root.get_text_username()
         
 Screen: 
     MDToolbar:
@@ -48,12 +49,6 @@ Screen:
         mg_bg_color: app.theme_cls.primary_color
         elevation: 10
         pos_hint: {"top": 1}
-    MDFloatingActionButton:
-        icon: "plus"
-        md_bg_color: app.theme_cls.primary_color
-        elevation_normal: 10
-        pos_hint: {"right": 0.1, "top": 0.12}
-        on_release: app.new_chat_dialog()
     MDGridLayout:
         size_hint_x: 0.25
         pos_hint: {"top": 0.89, "left":1}
@@ -80,7 +75,7 @@ Screen:
             height: self.minimum_height
             spacing: "5dp"
     MDIconButton:
-        icon: "button.png"
+        icon: 'arrow-right'
         user_font_size: "22sp"
         pos_hint: {"top": 0.1, "right":1}
         on_release: app.set_message()
@@ -99,7 +94,8 @@ class Content(BoxLayout):
 
 
 class Dialog(BoxLayout):
-    pass
+    def get_text_username(self):
+        return db.get_username()
 
 
 # sm = ScreenManager()
@@ -125,16 +121,15 @@ class Chat(MDApp):
         self.theme_cls.primary_palette = "LightBlue"
         return self.screen
 
-    def on_kv_post(self):
-        thread.start_new_thread(lambda: ws.synch_all(self, [self.active_dialog, theme_cls]), ())
-        self.nickname = db.get_username()
-
     def on_start(self):
+        ws.set_object_chats(self)
+        thread.start_new_thread(lambda: ws.synch_all(self, self.pressed_btn), ())
         for chat in db.get_chats():
             self.chats[chat[0]] = chat[1]
         self.nickname = db.get_username()
-        self.dialog_nickname()
         self.get_chats()
+        if not db.get_username():
+            self.dialog_nickname()
 
     def check_and_start(self):
         if self.nickname != '':
@@ -144,11 +139,14 @@ class Chat(MDApp):
         for key, value in self.chats.items():
             if chat_name == value:
                 self.chat_id = key
+                ws.set_id_button([key])
                 break
         self.root.ids.coc.clear_widgets()
         messages = db.get_messages(self.chat_id)
         for name in messages:
             self.root.ids.coc.add_widget(ThreeLineListItem(text=name[0], secondary_text=name[2], tertiary_text=name[1]))
+        ws.set_id_button(self.chat_id)
+        ws.synch_messages()
 
 
     def get_chats(self):    # update_chats
@@ -158,7 +156,7 @@ class Chat(MDApp):
                 MDRectangleFlatButton(
                     text=chat[1],
                     size_hint=(.1, None),
-                    on_press=self.pressed_btn,
+                    on_release=self.pressed_btn,
                 )
             )
 
@@ -170,12 +168,11 @@ class Chat(MDApp):
     def set_message(self):
         text_message = self.root.ids.message.text
         if text_message != '':
-            today = datetime.today()
-            db.set_message(text_message,today.strftime(
-                    "%Y-%m-%d-%H.%M.%S"), self.chat_id, self.nickname)
-            self.root.ids.coc.add_widget(ThreeLineListItem(text=text_message, secondary_text=self.nickname, tertiary_text=today.strftime(
-                    "%Y-%m-%d-%H.%M.%S")))
+            today = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+            db.set_message(text_message,today, self.chat_id, self.nickname)
+            self.root.ids.coc.add_widget(ThreeLineListItem(text=text_message, secondary_text=self.nickname, tertiary_text=today))
             self.root.ids.message.text = ""
+            ws.send_message(text_message,today ,self.nickname , self.chat_id)
 
     def __init__(self, **kwargs):  # создание меню
         super().__init__(**kwargs)
@@ -189,40 +186,22 @@ class Chat(MDApp):
                 content_cls=Dialog(),
                 buttons=[
                     MDFlatButton(
-                        text="Закрыть", text_color=self.theme_cls.primary_color, on_press=self.closeDialog
-                    ),
-                    MDFlatButton(
-                        text="Сохранить", text_color=self.theme_cls.primary_color, on_press=lambda x: self.grabText(inst=x)
-                    ),
-                ],
-            )
-        self.dialog_2.open()
-
-    def new_chat_dialog(self):  # этот метод должен вызваться при нажатии кнопки
-        if not self.dialog_1:
-            self.dialog_1 = MDDialog(
-                title="Новый чат",
-                type="custom",
-                content_cls=Content(),
-                buttons=[
-                    MDFlatButton(
                         text="Закрыть", text_color=self.theme_cls.primary_color, on_release=self.closeDialog
                     ),
-                    MDFlatButton(
-                        text="Создать", text_color=self.theme_cls.primary_color
+                    MDRaisedButton(
+                        text="Сохранить", text_color=self.theme_cls.primary_color, on_release=lambda x: self.grabText(inst=x)
                     ),
                 ],
             )
-        self.dialog_1.open()
+        self.dialog_2.set_normal_height()
+        self.dialog_2.open()
 
     def grabText(self, inst):
-        print(inst)
         for obj in self.dialog_2.content_cls.children:
             if isinstance(obj, MDTextField):
                 if obj.text != '':
                     print(obj.text)
                     db.set_username(obj.text)
-        self.check_and_start()
 
     def closeDialog(self, inst):
         if self.dialog_2:

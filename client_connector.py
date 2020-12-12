@@ -21,6 +21,7 @@ class ClientConnector:
     db = None
     object_dialog = None
     last_time_connected = None
+    _id_button = int()
 
     def __init__(self, url, port, routes, db):
         self.url, self.port = url, port
@@ -35,8 +36,9 @@ class ClientConnector:
         self.connect()
 
     def on_connected(self, connection):
-        connection.send('/messages/get',
-                        json.dumps({'chat_id': self._id_button[0], 'since': connection.last_time_connected}),
+        if self._id_button != 0:
+            connection.send('/messages/get',
+                        json.dumps({'chat_id': self._id_button, 'since': connection.last_time_connected}),
                         callback=lambda _, data: self.get_message_from_server(json.loads(data)))
 
     def connect(self):
@@ -84,11 +86,13 @@ class ClientConnector:
     def get_message_from_server(self, response):
         for data in response:
             self.db.set_message(text_message=data[0], time=data[1], chat_id=data[3], author=data[2])
-            if self.object_chats.parent.current == 'Chat' and self._id_button[0] == data[3]:
+            if self._id_button == data[3]:
                 item_mes = ThreeLineListItem(text=data[0], secondary_text=data[2],
                                              tertiary_text=data[1])
-                self.object_chats.parent.ids.chat.ids.messages.add_widget(item_mes)
+                self.object_chats.root.ids.coc.add_widget(item_mes)
 
-    def set_object_chats(self, object_chats, _id_button):
+    def set_object_chats(self, object_chats):
         self.object_chats = object_chats
+
+    def set_id_button(self, _id_button):
         self._id_button = _id_button
