@@ -1,26 +1,24 @@
-import sqlite3
 from datetime import datetime
 
 from kivy.lang import Builder
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.screenmanager import ScreenManager, Screen
 from kivymd.app import MDApp
-from kivymd.uix.button import MDRectangleFlatButton, MDTextButton, MDFlatButton, MDFloatingActionButton
-from kivymd.uix.card import MDCard, MDSeparator
+from kivymd.theming import ThemeManager
+from kivymd.uix.button import MDRectangleFlatButton, MDFlatButton, MDRaisedButton
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.label import MDLabel
-from kivymd.uix.menu import MDDropdownMenu
-from kivymd.uix.textfield import MDTextField, MDTextFieldRect, MDTextFieldRound
+from kivymd.uix.list import ThreeLineListItem
+from kivymd.uix.textfield import MDTextField
+
+from db_controller import DBController
+from ws_controller import WSConstroller
+
+try:
+    import thread
+except ImportError:
+    import _thread as thread
 
 KV = '''
-<Content>
-    orientation: "vertical"
-    spacing: "12dp"
-    size_hint_y: None
-    height: "120dp"
-
-    MDTextField:
-        hint_text: "Название" 
         
 <Dialog>
     orientation: "vertical"
@@ -30,6 +28,10 @@ KV = '''
 
     MDTextField:
         hint_text: "Ваш логин"
+        required: True
+        helper_text: "Введите логин! (сохранив пустое поле, вы будете сохранены под старым логином)"
+        helper_text_mode: "on_error"
+        text: root.get_text_username()
         
 Screen: 
     MDToolbar:
@@ -39,12 +41,6 @@ Screen:
         mg_bg_color: app.theme_cls.primary_color
         elevation: 10
         pos_hint: {"top": 1}
-    MDFloatingActionButton:
-        icon: "plus"
-        md_bg_color: app.theme_cls.primary_color
-        elevation_normal: 10
-        pos_hint: {"right": 0.1, "top": 0.12}
-        on_release: app.new_chat_dialog()
     MDGridLayout:
         size_hint_x: 0.25
         pos_hint: {"top": 0.89, "left":1}
@@ -57,9 +53,9 @@ Screen:
         # setting the width of the scrollbar to 50pixels
         bar_width: 10
         # setting the color of the active bar using rgba
-        bar_color: 50, 50, 55, .8
+        bar_color: .6, .6, .6, .8
         # setting the color of the inactive bar using rgba
-        bar_inactive_color: 50, 40, 50, .8
+        bar_inactive_color: .663, .663, .663, .8
         # setting the content only to scroll via bar, not content
         scroll_type: ['bars']
         pos_hint: {"top": 0.89, "right":0.998}
@@ -67,11 +63,12 @@ Screen:
             size_hint_y: None
             id: coc
             cols: 1
-            size_hint_x: None
+            size_hint_x: 1
             height: self.minimum_height
             spacing: "5dp"
+         
     MDIconButton:
-        icon: "button.png"
+        icon: 'arrow-right'
         user_font_size: "22sp"
         pos_hint: {"top": 0.1, "right":1}
         on_release: app.set_message()
@@ -90,27 +87,27 @@ class Content(BoxLayout):
 
 
 class Dialog(BoxLayout):
-    pass
+    def get_text_username(self):
+        return db.get_username()
 
 
 # sm = ScreenManager()
 # sm.add_widget(MenuScreen(name='menu'))
 # sm.add_widget(SpinnerScreen(name='spinner'))
 
+db = DBController()
+
+ws = WSConstroller(db)
+theme_cls = ThemeManager()
+
 
 class Chat(MDApp):
-    conn = sqlite3.connect('test.db3')
-    cursor = conn.cursor()
-    sql = {'getChat_name': "SELECT chat_name FROM chat",
-           'getMessage_text_message': "SELECT text_message FROM message where chat_id =",
-           'getAuthors': "SELECT author FROM message"}
     dialog_1 = None
     dialog_2 = None
-    chats = {}
-    nickname = ''
+    chats = dict()
+    nickname = 'Guest'
+    length_chats = 0;
     press = 0
-    count_dialogs = 0
-    count_messages = 0
     active_dialog = ''
     chat_id = 1
 
@@ -120,59 +117,56 @@ class Chat(MDApp):
         return self.screen
 
     def on_start(self):
-        self.dialog_nickname()
+        ws.set_object_chats(self)
+        thread.start_new_thread(lambda: ws.synch_all(self, self.pressed_btn), ())
+        for chat in db.get_chats():
+            self.chats[chat[0]] = chat[1]
+        self.nickname = db.get_username()
+        self.get_chats()
+        if not db.get_username():
+            self.dialog_nickname()
 
     def check_and_start(self):
         if self.nickname != '':
             self.get_chats()
 
-    def get_message(self, chat_name, visit):
-        self.chat_id = self.chats.get(chat_name)
-        if visit == "get_chats":
-            self.root.ids.coc.clear_widgets()
-            self.count_messages = 0
-        self.cursor.execute(self.sql['getMessage_text_message'] + str(self.chat_id))
-        text_message = self.cursor.fetchall()
-        if self.count_messages != len(text_message):
-            for k in range(self.count_messages, len(text_message)):
-                self.root.ids.coc.add_widget(
-                    MDLabel(
-                        text=str(*text_message[k]),
-                        size_hint=(.1, None),
-                    )
-                )
-        self.count_messages = len(text_message)
+    def get_message(self, chat_name):
+        for key, value in self.chats.items():
+            if chat_name == value:
+                self.chat_id = key
+                ws.set_id_button([key])
+                break
+        self.root.ids.coc.clear_widgets()
+        messages = db.get_messages(self.chat_id)
+        for name in messages:
+            self.root.ids.coc.add_widget(ThreeLineListItem(text=name[0], secondary_text=name[2], tertiary_text=name[1]))
+        ws.set_id_button(self.chat_id)
+        ws.synch_messages()
 
     def get_chats(self):
-        self.cursor.execute(self.sql['getChat_name'])
-        chat_name = self.cursor.fetchall()
-        if self.count_dialogs != len(chat_name):
-            for i in range(0, len(chat_name)):
-                self.chats[str(*chat_name[i])] = i + 1
-                self.root.ids.box.add_widget(
-                    MDRectangleFlatButton(
-                        text=str(*chat_name[i]),
-                        size_hint=(.1, None),
-                        on_press=self.pressed_btn,
-                    )
+        # update_chats
+        chat_name = db.get_chats()
+        for i in range(self.length_chats, len(chat_name)):
+            self.root.ids.box.add_widget(
+                MDRectangleFlatButton(
+                    text=str(chat_name[i]),
+                    size_hint=(.1, None),
+                    on_release=self.pressed_btn,
                 )
-        self.count_dialogs = len(chat_name)
+            )
+        self.length_chats = len(chat_name)
 
     def pressed_btn(self, instance_toggle_button):
         self.active_dialog = instance_toggle_button.text
-        self.get_message(self.active_dialog, "get_chats")
+        self.get_message(self.active_dialog)
 
     def set_message(self):
         text_message = self.root.ids.message.text
         if text_message != '':
-            today = datetime.today()
-            self.cursor.execute(
-                "INSERT INTO message (text_message, time, chat_id, author) VALUES ('" + text_message + "', '" + today.strftime(
-                    "%Y-%m-%d-%H.%M.%S") + "', '" + str(self.chat_id) + "', '" + self.nickname + "');");
-            self.conn.commit()
-            self.get_message(self.active_dialog, "set_message")
-            self.get_chats()
+            today = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+            db.set_message(text_message, today, self.chat_id, self.nickname)
             self.root.ids.message.text = ""
+            ws.send_message(text_message, today, self.nickname, self.chat_id)
 
     def __init__(self, **kwargs):  # создание меню
         super().__init__(**kwargs)
@@ -181,43 +175,28 @@ class Chat(MDApp):
     def dialog_nickname(self):
         if not self.dialog_2:
             self.dialog_2 = MDDialog(
-                title="Никнейм",
+                title="Логин",
                 type="custom",
                 content_cls=Dialog(),
                 buttons=[
                     MDFlatButton(
                         text="Закрыть", text_color=self.theme_cls.primary_color, on_release=self.closeDialog
                     ),
-                    MDFlatButton(
-                        text="Сохранить", text_color=self.theme_cls.primary_color, on_release=self.grabText
+                    MDRaisedButton(
+                        text="Сохранить", text_color=self.theme_cls.primary_color,
+                        on_release=lambda x: self.grabText(inst=x)
                     ),
                 ],
             )
+        self.dialog_2.set_normal_height()
         self.dialog_2.open()
-
-    def new_chat_dialog(self):  # этот метод должен вызваться при нажатии кнопки
-        if not self.dialog_1:
-            self.dialog_1 = MDDialog(
-                title="Новый чат",
-                type="custom",
-                content_cls=Content(),
-                buttons=[
-                    MDFlatButton(
-                        text="Закрыть", text_color=self.theme_cls.primary_color, on_release=self.closeDialog
-                    ),
-                    MDFlatButton(
-                        text="Создать", text_color=self.theme_cls.primary_color
-                    ),
-                ],
-            )
-        self.dialog_1.open()
 
     def grabText(self, inst):
         for obj in self.dialog_2.content_cls.children:
             if isinstance(obj, MDTextField):
                 if obj.text != '':
-                    self.nickname = obj.text
-        self.check_and_start()
+                    print(obj.text)
+                    db.set_username(obj.text)
 
     def closeDialog(self, inst):
         if self.dialog_2:
@@ -225,9 +204,6 @@ class Chat(MDApp):
             self.check_and_start()
         if self.dialog_1:
             self.dialog_1.dismiss()
-
-    def on_stop(self):
-        self.conn.close()
 
 
 Chat().run()
